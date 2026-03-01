@@ -3,7 +3,8 @@
 #define SLANG_DEBUG
 #include "slang-lib.h"
 
-#define BUFFER_SIZE 128   // MUSS 128 sein für Teensy Audio
+#define BUFFER_SIZE 128
+#define SAMPLE_RATE AUDIO_SAMPLE_RATE_EXACT
 
 // =====================================================
 // Slang
@@ -27,11 +28,38 @@ const int LED_PIN = 13;
 static int blockCount = 0;
 
 // =====================================================
-void setup() {
 
+void initBlink() {
+    pinMode(LED_PIN, OUTPUT);
+    for (int i = 0; i < 3; i++) {
+        digitalWrite(LED_PIN, HIGH);
+        delay(200);
+        digitalWrite(LED_PIN, LOW);
+        delay(200);
+    }
+}
+
+void runtimeDebug() {
+    int triggerLimit = 128; // Anzahl der Blöcke, nach denen die Debug-Info ausgegeben wird
+    blockCount++;
+    if (blockCount >= triggerLimit) {
+        Serial.print("[Loqui] ");
+        Serial.print(triggerLimit);
+        Serial.print(" blocks rendered -> ");
+        Serial.print(triggerLimit * BUFFER_SIZE);
+        Serial.print(" samples (");
+        Serial.print((triggerLimit * BUFFER_SIZE) / SAMPLE_RATE);
+        Serial.println(" seconds)");
+        //Serial.print("[Loqui] Buffer[0]: ");
+        //Serial.println(buf[0]);
+        digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+        blockCount = 0;
+    }
+}
+
+void setup() {
     pinMode(LED_PIN, OUTPUT);
     Serial.begin(115200);
-    delay(500);
 
     Serial.println("Teensy Slang Audio startet...");
 
@@ -41,45 +69,38 @@ void setup() {
     // =================================================
     // Slang Setup
     // =================================================
-    char* p = (char*)"x = sawtoothosc(110);";
+    char* p = (char*)"ss = stepsequencer([1, 1.2, 1.33333, 1.5,  1.6, 1.5, 1.3333, 1.6], 240); lin = linenvelope(ss, 0.001, 0.05, 0.001, 0.25); c = sawtoothosc(ss * 110); e = sawtoothosc(ss * 55); f = sawtoothosc(ss * 110.2); g = sawtoothosc(ss * 220); lowpassfilter(MAIN, 1500 * lin); springreverb(0.05, 0.8, 0.4, 0.5);";
     int length = 0;
 
     tokens = tokenize(p, &length);
     interpreter = createSlangInterpreter(tokens, length);
 
-    sbc = createBufferCore(interpreter, 44100, BUFFER_SIZE);
+    sbc = createBufferCore(interpreter, AUDIO_SAMPLE_RATE_EXACT, BUFFER_SIZE);
 
     interpret(interpreter);
+    
+    Serial.print("Slang BufferCore initialisiert mit Sample-Rate: ");
+    Serial.println(AUDIO_SAMPLE_RATE_EXACT);
+
+    initBlink();
 }
 
 // =====================================================
 void loop() {
-    float* buf = renderBuffer(sbc);
-    // Audio-Interrupt muss zuerst laufen
-    // Daher erst prüfen ob Block verfügbar
-    if (playQueue.available() > 0) {
-
-        
+    if (playQueue.available() >= 1) {       
+        float* buf = renderBuffer(sbc);
         int16_t* audioBlock = playQueue.getBuffer();
 
-        for (int i = 0; i < BUFFER_SIZE; i++) {
-
+        for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
             float sample = buf[i];
 
-            // Clipping Schutz
-            if (sample > 1.0f)  sample = 1.0f;
-            if (sample < -1.0f) sample = -1.0f;
+            //if (sample > 1.0f)  sample = 1.0f;
+            //if (sample < -1.0f) sample = -1.0f;
 
-            audioBlock[i] = (int16_t)(sample * 32767.0f);
+            audioBlock[i] = (int16_t)(sample * 16384.0f);
         }
 
         playQueue.playBuffer();
-    }
-
-    // LED Debug
-    blockCount++;
-    if (blockCount >= 2048) {
-        digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-        blockCount = 0;
+        runtimeDebug();
     }
 }
